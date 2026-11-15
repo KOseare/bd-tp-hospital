@@ -469,7 +469,7 @@ INSERT INTO vacacion VALUES
 INSERT INTO guardia VALUES
    ( 1,
      timestamp '2026-11-02 06:00:00',
-     timestamp '2026-11-02 14:00:00' );  -- manana
+     timestamp '2026-11-02 14:00:00' );  -- mañana
 INSERT INTO guardia VALUES
    ( 2,
      timestamp '2026-11-02 14:00:00',
@@ -481,11 +481,11 @@ INSERT INTO guardia VALUES
 INSERT INTO guardia VALUES
    ( 4,
      timestamp '2026-11-03 06:00:00',
-     timestamp '2026-11-03 14:00:00' );  -- manana
+     timestamp '2026-11-03 14:00:00' );  -- mañana
 INSERT INTO guardia VALUES
    ( 5,
      timestamp '2026-11-10 06:00:00',
-     timestamp '2026-11-10 14:00:00' );  -- manana
+     timestamp '2026-11-10 14:00:00' );  -- mañana
 
 INSERT INTO guardia_turno_manana VALUES
    ( 1 );
