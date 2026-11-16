@@ -124,3 +124,36 @@ BEGIN
    VALUES (USER, SYS_CONTEXT('USERENV', 'OS_USER'), 'VACACION', v_op, v_clave, v_detalle);
 END;
 /
+
+-- 5. Trigger de auditoria sobre GUARDIA (afecta horarios, turnos y disponibilidad)
+CREATE OR REPLACE TRIGGER trg_aud_guardia
+AFTER INSERT OR UPDATE OR DELETE ON guardia
+FOR EACH ROW
+DECLARE
+   v_op      VARCHAR2(10);
+   v_clave   VARCHAR2(200);
+   v_detalle VARCHAR2(1000);
+BEGIN
+   IF INSERTING THEN
+      v_op      := 'INSERT';
+      v_clave   := 'Guardia ID:' || :NEW.id_guardia;
+      v_detalle := 'Alta de guardia. Inicio: ' || TO_CHAR(:NEW.fecha_inicio_guardia, 'YYYY-MM-DD HH24:MI:SS') || 
+                   ' | Fin: ' || TO_CHAR(:NEW.fecha_fin_guardia, 'YYYY-MM-DD HH24:MI:SS');
+   ELSIF UPDATING THEN
+      v_op      := 'UPDATE';
+      v_clave   := 'Guardia ID:' || :OLD.id_guardia;
+      v_detalle := 'Inicio anterior: ' || TO_CHAR(:OLD.fecha_inicio_guardia, 'YYYY-MM-DD HH24:MI:SS') ||
+                   ' -> Inicio nuevo: ' || TO_CHAR(:NEW.fecha_inicio_guardia, 'YYYY-MM-DD HH24:MI:SS') ||
+                   ' | Fin anterior: ' || TO_CHAR(:OLD.fecha_fin_guardia, 'YYYY-MM-DD HH24:MI:SS') ||
+                   ' -> Fin nuevo: ' || TO_CHAR(:NEW.fecha_fin_guardia, 'YYYY-MM-DD HH24:MI:SS');
+   ELSIF DELETING THEN
+      v_op      := 'DELETE';
+      v_clave   := 'Guardia ID:' || :OLD.id_guardia;
+      v_detalle := 'Baja de guardia. Inicio era: ' || TO_CHAR(:OLD.fecha_inicio_guardia, 'YYYY-MM-DD HH24:MI:SS') ||
+                   ' | Fin era: ' || TO_CHAR(:OLD.fecha_fin_guardia, 'YYYY-MM-DD HH24:MI:SS');
+   END IF;
+
+   INSERT INTO auditoria_guardias (usuario_bd, usuario_so, tabla_afectada, operacion, clave_registro, detalle_cambio)
+   VALUES (USER, SYS_CONTEXT('USERENV', 'OS_USER'), 'GUARDIA', v_op, v_clave, v_detalle);
+END;
+/
