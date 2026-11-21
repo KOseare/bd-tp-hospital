@@ -1,5 +1,6 @@
 -- CASCADE CONSTRAINTS elimina las restricciones de la tabla y FK que dependen de ella
 -- PURGE elimina los datos, inclusive los de la papelera de reciclaje
+DROP TABLE auditoria_guardias CASCADE CONSTRAINTS PURGE;
 DROP TABLE comentario CASCADE CONSTRAINTS PURGE;
 DROP TABLE recorrido CASCADE CONSTRAINTS PURGE;
 DROP TABLE es_visitada CASCADE CONSTRAINTS PURGE;
