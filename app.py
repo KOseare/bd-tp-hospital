@@ -12,6 +12,7 @@ from tkinter import filedialog, messagebox, ttk
 import oracledb
 
 import db
+import pruebas
 
 
 # ---------------------------------------------------------------------------
@@ -21,6 +22,9 @@ def ejecutar(accion, mensaje_ok=None, despues=None):
     """Corre accion() mostrando los errores; si sale bien avisa y refresca."""
     try:
         resultado = accion()
+    except db.ErrorTrigger as e:
+        messagebox.showwarning(f"Regla de negocio (ORA-{e.codigo})", str(e))
+        return None
     except db.ReglaError as e:
         messagebox.showwarning("No se pudo completar", str(e))
         return None
@@ -129,6 +133,7 @@ class App:
         self._tab_internaciones()
         self._tab_guardias()
         self._tab_auditoria()
+        self._tab_pruebas()
         self.refrescar_todo()
 
     # ----- Camas disponibles -------------------------------------------------
@@ -383,6 +388,11 @@ class App:
 
     def refrescar_auditoria(self):
         llenar(self.t_audit, db.listar_auditoria())
+
+    # ----- Batería de pruebas -------------------------------------------------
+    def _tab_pruebas(self):
+        panel = pruebas.PanelPruebas(self.nb)
+        self.nb.add(panel, text="Batería de pruebas")
 
     # ----- Refresco general ---------------------------------------------------
     def refrescar_todo(self):

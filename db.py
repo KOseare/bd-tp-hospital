@@ -7,6 +7,7 @@ de Oracle) hacen ROLLBACK y no queda nada a medias.
 Config por variables de entorno (no dejar la clave escrita en el código):
     HOSPITAL_USER, HOSPITAL_PASSWORD, HOSPITAL_DSN (ej: localhost:1521/XEPDB1)
 """
+import atexit
 import os
 import re
 from contextlib import contextmanager
@@ -16,40 +17,83 @@ import oracledb
 
 USUARIO = os.getenv("HOSPITAL_USER", "hospital")
 CLAVE = os.getenv("HOSPITAL_PASSWORD", "hospital")
-DSN = os.getenv("HOSPITAL_DSN", "localhost:1521/XEPDB1")
+DSN = os.getenv("HOSPITAL_DSN", "127.0.0.1:1521/XEPDB1")
 
 # Turno -> (nombre, hora de inicio). Cada turno dura 8 horas.
 TURNOS = {1: ("Mañana", 6), 2: ("Tarde", 14), 3: ("Noche", 22)}
 TABLA_TURNO = {1: "guardia_turno_manana", 2: "guardia_turno_tarde", 3: "guardia_turno_noche"}
 
+_pool = None
+
 
 class ReglaError(Exception):
-    """Una regla del enunciado que la base no controla y valida la app."""
+    """Una regla del enunciado que valida la app."""
+
+
+class ErrorTrigger(ReglaError):
+    """Error de regla de negocio devuelto por un trigger de Oracle (ORA-20000..20999)."""
+
+    def __init__(self, codigo, mensaje):
+        self.codigo = codigo
+        super().__init__(mensaje)
+
+
+def _obtener_pool():
+    global _pool
+    if _pool is None:
+        _pool = oracledb.create_pool(
+            user=USUARIO, password=CLAVE, dsn=DSN,
+            min=1, max=4, increment=1)
+    return _pool
+
+
+def cerrar_pool():
+    global _pool
+    if _pool is not None:
+        try:
+            _pool.close(force=True)
+        except oracledb.Error:
+            pass
+        _pool = None
+
+
+atexit.register(cerrar_pool)
 
 
 def conectar():
-    return oracledb.connect(user=USUARIO, password=CLAVE, dsn=DSN)
+    return _obtener_pool().acquire()
 
 
 @contextmanager
 def transaccion():
     """Entrega un cursor; COMMIT si el bloque termina bien, ROLLBACK si falla."""
     cnx = conectar()
+    cur = cnx.cursor()
     try:
-        yield cnx.cursor()
+        yield cur
         cnx.commit()
+    except oracledb.DatabaseError as e:
+        cnx.rollback()
+        err = e.args[0] if e.args else None
+        codigo = getattr(err, "code", None)
+        if codigo is not None and 20000 <= codigo <= 20999:
+            primera = (getattr(err, "message", None) or str(e)).strip().splitlines()[0]
+            texto = re.sub(r"^ORA-\d+:\s*", "", primera).strip()
+            raise ErrorTrigger(codigo, texto) from e
+        raise
     except Exception:
         cnx.rollback()
         raise
     finally:
+        cur.close()
         cnx.close()
 
 
 def consultar(sql, **params):
     with conectar() as cnx:
-        cur = cnx.cursor()
-        cur.execute(sql, params)
-        return cur.fetchall()
+        with cnx.cursor() as cur:
+            cur.execute(sql, params)
+            return cur.fetchall()
 
 
 # ---------------------------------------------------------------------------
@@ -58,18 +102,16 @@ def consultar(sql, **params):
 def camas_disponibles():
     """Llama al procedure con sus dos cursores: (resumen, detalle)."""
     with conectar() as cnx:
-        cur = cnx.cursor()
-        c_cant, c_det = cnx.cursor(), cnx.cursor()
-        cur.callproc("pr_camas_disponibles", [c_cant, c_det])
-        return c_cant.fetchall(), c_det.fetchall()
+        with cnx.cursor() as cur, cnx.cursor() as c_cant, cnx.cursor() as c_det:
+            cur.callproc("pr_camas_disponibles", [c_cant, c_det])
+            return c_cant.fetchall(), c_det.fetchall()
 
 
 def comentarios_internacion(id_internacion, dni):
     with conectar() as cnx:
-        cur = cnx.cursor()
-        c = cnx.cursor()
-        cur.callproc("pr_comentarios_internacion", [id_internacion, dni, c])
-        return c.fetchall()
+        with cnx.cursor() as cur, cnx.cursor() as c:
+            cur.callproc("pr_comentarios_internacion", [id_internacion, dni, c])
+            return c.fetchall()
 
 
 def listar_pacientes():
@@ -200,15 +242,15 @@ def alta_medico(matricula, dni, nombre, apellido, cuil, fecha_ingreso,
             raise ReglaError("Ya existe un médico con ese CUIL/CUIT.")
         _asegurar_persona(cur, dni, nombre, apellido)
 
-        cur_med = cur.connection.cursor()   # cursor propio por el BLOB
-        if foto:
-            cur_med.setinputsizes(foto=oracledb.DB_TYPE_BLOB)
-        cur_med.execute(
-            """INSERT INTO medico (matricula_medico, dni, foto, cuil_cuit,
-                                   fecha_de_ingreso, cantidad_guardias)
-               VALUES (:mat, :dni, :foto, :cuil, :ing, :maxg)""",
-            mat=matricula, dni=dni, foto=foto or None, cuil=cuil,
-            ing=fecha_ingreso, maxg=max_guardias)
+        with cur.connection.cursor() as cur_med:   # cursor propio por el BLOB
+            if foto:
+                cur_med.setinputsizes(foto=oracledb.DB_TYPE_BLOB)
+            cur_med.execute(
+                """INSERT INTO medico (matricula_medico, dni, foto, cuil_cuit,
+                                       fecha_de_ingreso, cantidad_guardias)
+                   VALUES (:mat, :dni, :foto, :cuil, :ing, :maxg)""",
+                mat=matricula, dni=dni, foto=foto or None, cuil=cuil,
+                ing=fecha_ingreso, maxg=max_guardias)
 
         for esp, hace_guardia in especialidades:
             if _contar(cur, "SELECT COUNT(*) FROM especialidad WHERE nombre_especialidad = :e",
@@ -223,25 +265,18 @@ def alta_medico(matricula, dni, nombre, apellido, cuil, fecha_ingreso,
 # ---------------------------------------------------------------------------
 # Internaciones y camas
 # ---------------------------------------------------------------------------
-def _tomar_cama(cur, nro_hab, nro_cama, ahora):
-    """Bloquea la fila de la cama y verifica que esté libre en este instante.
+def _tomar_cama(cur, nro_hab, nro_cama):
+    """Bloquea la fila de la cama para serializar asignaciones concurrentes.
 
     El FOR UPDATE evita que dos usuarios le asignen la misma cama a la vez:
-    el segundo espera al COMMIT/ROLLBACK del primero y ve la cama ya ocupada.
+    el segundo espera al COMMIT/ROLLBACK del primero y luego el trigger
+    trg_validar_ocupa (ORA-20011) detecta si quedó ocupada.
     """
     cur.execute(
         "SELECT 1 FROM cama WHERE nro_habitacion = :h AND nro_cama = :c FOR UPDATE",
         h=nro_hab, c=nro_cama)
     if cur.fetchone() is None:
         raise ReglaError("La cama indicada no existe.")
-    ocupada = _contar(cur, """
-        SELECT COUNT(*) FROM ocupa
-         WHERE nro_habitacion = :h AND nro_cama = :c
-           AND fecha_asignacion_cama <= :ahora
-           AND (fecha_terminacion_cama IS NULL OR fecha_terminacion_cama > :ahora)""",
-        h=nro_hab, c=nro_cama, ahora=ahora)
-    if ocupada:
-        raise ReglaError(f"La cama {nro_cama} de la habitación {nro_hab} está ocupada.")
 
 
 def _asignar_cama(cur, id_internacion, nro_hab, nro_cama, ahora):
@@ -252,28 +287,26 @@ def _asignar_cama(cur, id_internacion, nro_hab, nro_cama, ahora):
 
 
 def internar(dni, matricula, nro_hab, nro_cama):
-    """Transacción: valida, crea la INTERNACION y le asigna la primera cama."""
+    """Transacción: crea la INTERNACION y le asigna la primera cama.
+
+    Delega en triggers de Oracle:
+      - trg_internacion_medico_paciente (ORA-20001): médico principal <> paciente
+      - trg_validar_ocupa (ORA-20010..20012): rango y no solapamiento de camas
+    """
     ahora = datetime.now()
     with transaccion() as cur:
         cur.execute("SELECT 1 FROM paciente WHERE dni = :dni FOR UPDATE", dni=dni)
         if cur.fetchone() is None:
             raise ReglaError("El DNI no corresponde a un paciente registrado.")
-        cur.execute("SELECT dni FROM medico WHERE matricula_medico = :m", m=matricula)
-        medico = cur.fetchone()
-        if medico is None:
+        cur.execute("SELECT 1 FROM medico WHERE matricula_medico = :m", m=matricula)
+        if cur.fetchone() is None:
             raise ReglaError("La matrícula no corresponde a un médico registrado.")
-        if medico[0] == dni:
-            raise ReglaError(
-                f"El médico principal elegido (matrícula {matricula}) es la misma persona "
-                f"que el paciente (DNI {dni}).\n\n"
-                "Un médico internado no puede atenderse a sí mismo: "
-                "elegí otro médico principal.")
         if _contar(cur, """SELECT COUNT(*) FROM internacion
                             WHERE dni = :dni AND fecha_terminacion_internacion IS NULL""",
                    dni=dni):
             raise ReglaError("El paciente ya tiene una internación en curso.")
 
-        _tomar_cama(cur, nro_hab, nro_cama, ahora)
+        _tomar_cama(cur, nro_hab, nro_cama)
 
         nuevo_id = cur.var(int)
         cur.execute(
@@ -308,7 +341,7 @@ def cambiar_cama(id_internacion, nro_hab, nro_cama):
         actual = cur.fetchone()
         if actual and (int(actual[0]), int(actual[1])) == (nro_hab, nro_cama):
             raise ReglaError("El paciente ya está en esa cama.")
-        _tomar_cama(cur, nro_hab, nro_cama, ahora)
+        _tomar_cama(cur, nro_hab, nro_cama)
         if actual:
             cur.execute(
                 """UPDATE ocupa SET fecha_terminacion_cama = :ahora
@@ -347,43 +380,23 @@ def calcular_intervalo(dia, turnos):
 
 
 def alta_guardia(matricula, especialidad, dia, turnos):
+    """Transacción: crea GUARDIA, sus turnos y asigna DESEMPENA.
+
+    Delega en trg_validar_asignacion_guardia (ORA-20002..20005):
+      - hace_guardia = 'S', vacaciones, internación del médico y tope mensual.
+    Si el trigger rechaza el INSERT en DESEMPENA, transaccion() hace ROLLBACK
+    revirtiendo GUARDIA, los turnos y el registro de auditoría de esa operación.
+    """
     turnos, inicio, fin = calcular_intervalo(dia, turnos)
     with transaccion() as cur:
-        cur.execute("SELECT dni, cantidad_guardias FROM medico WHERE matricula_medico = :m",
-                    m=matricula)
-        medico = cur.fetchone()
-        if medico is None:
+        cur.execute("SELECT 1 FROM medico WHERE matricula_medico = :m FOR UPDATE", m=matricula)
+        if cur.fetchone() is None:
             raise ReglaError("El médico no existe.")
-        dni, max_mes = medico
 
-        hace = _contar(cur, """SELECT COUNT(*) FROM posee
-                                WHERE matricula_medico = :m AND nombre_especialidad = :e
-                                  AND hace_guardia = 'S'""", m=matricula, e=especialidad)
-        if not hace:
-            raise ReglaError("El médico no tiene esa especialidad o no acepta hacer guardia en ella.")
-
-        ini_mes = inicio.replace(day=1, hour=0, minute=0)
-        fin_mes = (ini_mes + timedelta(days=32)).replace(day=1)
-        en_mes = _contar(cur, """
-            SELECT COUNT(*) FROM desempena d JOIN guardia g ON g.id_guardia = d.id_guardia
-             WHERE d.matricula_medico = :m
-               AND g.fecha_inicio_guardia >= :ini_mes AND g.fecha_inicio_guardia < :fin_mes""",
-            m=matricula, ini_mes=ini_mes, fin_mes=fin_mes)
-        if en_mes >= max_mes:
-            raise ReglaError(f"El médico ya alcanzó su máximo de {max_mes} guardias en el mes.")
-
-        if _contar(cur, """SELECT COUNT(*) FROM vacacion
-                            WHERE matricula_medico = :m
-                              AND fecha_inicio_vac < :fin AND fecha_fin_vac > :ini""",
-                   m=matricula, ini=inicio, fin=fin):
-            raise ReglaError("El médico está de vacaciones en ese horario.")
-
-        if _contar(cur, """SELECT COUNT(*) FROM internacion
-                            WHERE dni = :dni AND fecha_inicio_internacion < :fin
-                              AND (fecha_terminacion_internacion IS NULL
-                                   OR fecha_terminacion_internacion > :ini)""",
-                   dni=dni, ini=inicio, fin=fin):
-            raise ReglaError("El médico está internado como paciente en ese horario.")
+        if not _contar(cur, """SELECT COUNT(*) FROM posee
+                                WHERE matricula_medico = :m AND nombre_especialidad = :e""",
+                       m=matricula, e=especialidad):
+            raise ReglaError("El médico no posee esa especialidad.")
 
         if _contar(cur, """SELECT COUNT(*) FROM desempena d JOIN guardia g ON g.id_guardia = d.id_guardia
                             WHERE d.nombre_especialidad = :e
