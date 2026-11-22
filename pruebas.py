@@ -682,8 +682,8 @@ class PanelPruebas(ttk.Frame):
         titulos = {"codigo": "#", "grupo": "Grupo / Requerimiento", "tipo": "Tipo",
                    "caso": "Caso de prueba", "esperado": "Esperado", "estado": "Estado"}
         for c in cols:
-            self.tabla.heading(c, text=titulos[c])
-            self.tabla.column(c, width=anchos[c], anchor="center" if c in ("codigo", "tipo", "estado") else "w")
+            self.tabla.heading(c, text=titulos[c], anchor="center")
+            self.tabla.column(c, width=anchos[c], anchor="center")
 
         self.tabla.tag_configure("pass", background="#dff5e1")
         self.tabla.tag_configure("fail", background="#fadbd8")

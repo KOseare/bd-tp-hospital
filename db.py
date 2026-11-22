@@ -15,8 +15,8 @@ from datetime import datetime, time, timedelta
 
 import oracledb
 
-USUARIO = os.getenv("HOSPITAL_USER", "hospital")
-CLAVE = os.getenv("HOSPITAL_PASSWORD", "hospital")
+USUARIO = os.getenv("HOSPITAL_USER", "tp_hospital")
+CLAVE = os.getenv("HOSPITAL_PASSWORD", "potentia")
 DSN = os.getenv("HOSPITAL_DSN", "127.0.0.1:1521/XEPDB1")
 
 # Turno -> (nombre, hora de inicio). Cada turno dura 8 horas.
@@ -174,7 +174,7 @@ def listar_guardias():
 def listar_auditoria():
     return consultar("""
         SELECT id_auditoria, TO_CHAR(fecha_hora, 'YYYY-MM-DD HH24:MI:SS'),
-               usuario_bd, tabla_afectada, operacion, clave_registro, detalle_cambio
+               usuario_bd, usuario_so, tabla_afectada, operacion, clave_registro, detalle_cambio
           FROM auditoria_guardias
          ORDER BY id_auditoria DESC
          FETCH FIRST 300 ROWS ONLY""")

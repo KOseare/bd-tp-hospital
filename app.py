@@ -87,8 +87,8 @@ def valor_combo(cb, nombre):
 def crear_tabla(parent, columnas, ancho=140, **pack):
     tabla = ttk.Treeview(parent, columns=columnas, show="headings", height=8)
     for c in columnas:
-        tabla.heading(c, text=c)
-        tabla.column(c, width=ancho)
+        tabla.heading(c, text=c, anchor="center")
+        tabla.column(c, width=ancho, anchor="center")
     pack.setdefault("expand", True)
     pack.setdefault("fill", "both")
     tabla.pack(**pack)
@@ -235,8 +235,8 @@ class App:
         ttk.Button(esp, text="Agregar", command=self.agregar_especialidad).grid(row=0, column=2, padx=4)
         self.t_esp = ttk.Treeview(esp, columns=("especialidad", "guardia"), show="headings", height=4)
         for c in ("especialidad", "guardia"):
-            self.t_esp.heading(c, text=c)
-            self.t_esp.column(c, width=130)
+            self.t_esp.heading(c, text=c, anchor="center")
+            self.t_esp.column(c, width=130, anchor="center")
         self.t_esp.grid(row=1, column=0, columnspan=3, padx=4, pady=4)
         ttk.Button(esp, text="Quitar seleccionada", command=self.quitar_especialidad
                    ).grid(row=2, column=0, columnspan=3, pady=2)
@@ -384,7 +384,11 @@ class App:
         ttk.Button(tab, text="Refrescar auditoría",
                    command=lambda: ejecutar(self.refrescar_auditoria)).pack(pady=5)
         self.t_audit = crear_tabla(
-            tab, ("id", "fecha_hora", "usuario", "tabla", "operacion", "clave", "detalle"), 150)
+            tab, ("id", "fecha_hora", "usuario_bd", "usuario_so", "tabla", "operacion", "clave", "detalle"), 135)
+        for col, ancho in (("id", 55), ("fecha_hora", 140), ("usuario_bd", 105),
+                           ("usuario_so", 110), ("tabla", 95), ("operacion", 80),
+                           ("clave", 220), ("detalle", 315)):
+            self.t_audit.column(col, width=ancho)
 
     def refrescar_auditoria(self):
         llenar(self.t_audit, db.listar_auditoria())
