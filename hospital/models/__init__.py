@@ -1,0 +1,51 @@
+"""Capa de Modelo: entidades de dominio y excepciones."""
+
+from hospital.models.entities import (
+    AuditoriaGuardia,
+    CamaDisponible,
+    CamaEstado,
+    CasoPrueba,
+    ComentarioVisita,
+    EspecialidadMedico,
+    Guardia,
+    Internacion,
+    Medico,
+    OcupacionCama,
+    Paciente,
+    Recorrido,
+    ResumenSector,
+    Ronda,
+    Vacacion,
+)
+from hospital.models.exceptions import (
+    AppError,
+    ErrorBaseDatos,
+    ErrorConcurrencia,
+    ErrorConexion,
+    ErrorTrigger,
+    ReglaError,
+)
+
+__all__ = [
+    "AppError",
+    "AuditoriaGuardia",
+    "CamaDisponible",
+    "CamaEstado",
+    "CasoPrueba",
+    "ComentarioVisita",
+    "ErrorBaseDatos",
+    "ErrorConcurrencia",
+    "ErrorConexion",
+    "ErrorTrigger",
+    "EspecialidadMedico",
+    "Guardia",
+    "Internacion",
+    "Medico",
+    "OcupacionCama",
+    "Paciente",
+    "Recorrido",
+    "ReglaError",
+    "ResumenSector",
+    "Ronda",
+    "Vacacion",
+]
