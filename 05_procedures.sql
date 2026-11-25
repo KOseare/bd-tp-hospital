@@ -96,10 +96,10 @@ END;
 -- Tiene muchos JOINs que son necesarios para obtener los datos.
 -- Sin embargo no son tan costosos porque buscan por clave primaria.
 
--- Posible indice que puede mejorar el rendimiento:
--- CREATE INDEX ix_comentario_internacion ON comentario (
---   id_internacion
---);
+-- Indice para mejorar el rendimiento del procedure anterior:
+CREATE INDEX ix_comentario_internacion ON comentario (
+   id_internacion
+);
 
 -- Para probar en terminal:
 -- VARIABLE comen REFCURSOR;
