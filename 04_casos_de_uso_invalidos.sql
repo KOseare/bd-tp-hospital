@@ -1,19 +1,10 @@
--- Casos de uso invalidos para el esquema del hospital.
--- Cada caso crea todo el contexto que necesita. No depende de
--- 03_casos_de_uso.sql ni de los casos anteriores, y puede ejecutarse solo
--- sobre un esquema vacio.
 -- Las claves de este archivo no se pisan con las de 03_casos_de_uso.sql.
 --
--- Parte 1. La sentencia indicada debe fallar. El contexto previo de ese
---          caso si se inserta. Si el cliente corta en el primer error, el
---          resto de los casos no llega a ejecutarse.
--- Parte 2. El enunciado los hace invalidos, pero el DDL actual los acepta.
---          Cada caso abre un SAVEPOINT y vuelve atras con
---          ROLLBACK TO SAVEPOINT, asi no deja filas ni borra otros casos.
---          Con autocommit ese ROLLBACK no alcanza.
+-- Parte 1. Fallan por constraints de las tablas.
+-- Parte 2. Fallan por restricciones del diseño y con los triggers correspondientes.
 
 -- #############################################################################
--- Parte 1. Deben fallar
+-- Parte 1. Constraints.
 -- #############################################################################
 
 -- =============================================================================
@@ -884,129 +875,15 @@ INSERT INTO comentario (
 );
 
 -- #############################################################################
--- Parte 2. Invalidos para el enunciado, aceptados por el DDL actual
+-- Parte 2. Restricciones del diseño y con los triggers correspondientes.
 -- Cada caso crea su contexto, inserta el escenario invalido y lo deshace.
 -- #############################################################################
-
--- =============================================================================
--- Caso de uso: Habitacion sin ninguna cama
--- El enunciado pide que una habitacion tenga 1 o mas camas. Este caso crea
--- el sector y la habitacion, y no inserta camas.
--- Resultado de hoy: el INSERT de la habitacion funciona. El SAVEPOINT lo deshace.
--- =============================================================================
-SAVEPOINT caso_i18;
-
-INSERT INTO sector (
-   nombre_sector
-) VALUES (
-   'Maternidad I18'
-);
-
-INSERT INTO habitacion (
-   nro_habitacion,
-   piso,
-   orientacion,
-   nombre_sector
-) VALUES (
-   7181,
-   7,
-   'SUR',
-   'Maternidad I18'
-);
-
-ROLLBACK TO SAVEPOINT caso_i18;
-
--- =============================================================================
--- Caso de uso: Dos internaciones abiertas del mismo paciente
--- El caso crea a la paciente, al medico y dos internaciones abiertas que se
--- solapan. El enunciado habla de muchas internaciones en la vida, no de dos
--- estadías simultaneas. El DDL no impide el solapamiento.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
--- =============================================================================
-SAVEPOINT caso_i19;
-
-INSERT INTO persona (
-   dni,
-   nombre,
-   apellido
-) VALUES (
-   '41900001',
-   'Ana',
-   'Ruiz'
-);
-
-INSERT INTO paciente (
-   dni,
-   fecha_nacimiento_paciente,
-   sexo_paciente
-) VALUES (
-   '41900001',
-   date '1992-04-12',
-   'F'
-);
-
-INSERT INTO persona (
-   dni,
-   nombre,
-   apellido
-) VALUES (
-   '41900002',
-   'Pablo',
-   'Nunez'
-);
-
-INSERT INTO medico (
-   matricula_medico,
-   dni,
-   foto,
-   cuil_cuit,
-   fecha_de_ingreso,
-   cantidad_guardias
-) VALUES (
-   9191,
-   '41900002',
-   null,
-   '27419000029',
-   timestamp '2019-09-01 00:00:00',
-   4
-);
-
-INSERT INTO internacion (
-   id_internacion,
-   fecha_inicio_internacion,
-   fecha_terminacion_internacion,
-   matricula_medico,
-   dni
-) VALUES (
-   6191,
-   timestamp '2026-11-02 08:30:00',
-   null,
-   9191,
-   '41900001'
-);
-
-INSERT INTO internacion (
-   id_internacion,
-   fecha_inicio_internacion,
-   fecha_terminacion_internacion,
-   matricula_medico,
-   dni
-) VALUES (
-   6192,
-   timestamp '2026-11-04 08:00:00',
-   null,
-   9191,
-   '41900001'
-);
-
-ROLLBACK TO SAVEPOINT caso_i19;
 
 -- =============================================================================
 -- Caso de uso: Dos camas abiertas a la vez en la misma internacion
 -- El caso crea dos camas y una internacion. La primera ocupacion sigue
 -- abierta cuando se abre la segunda. El modelo asume una sola cama a la vez.
 -- No hay constraint de exclusion.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i20;
 
@@ -1138,7 +1015,6 @@ ROLLBACK TO SAVEPOINT caso_i20;
 -- Caso de uso: Dos pacientes en la misma cama al mismo tiempo
 -- El caso crea una cama, dos pacientes y dos internaciones abiertas. Las dos
 -- ocupaciones de esa cama se solapan. El estado libre/ocupada no se guarda.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i21;
 
@@ -1297,7 +1173,6 @@ ROLLBACK TO SAVEPOINT caso_i21;
 -- El caso crea la especialidad con hace_guardia = 'N', la guardia y la
 -- asignacion. La FK contra POSEE se cumple porque la especialidad esta
 -- declarada. El trigger que exigiria 'S' no esta creado.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i22;
 
@@ -1376,7 +1251,6 @@ ROLLBACK TO SAVEPOINT caso_i22;
 -- El caso crea un medico con maximo 1 y le asigna dos guardias de noviembre
 -- en una especialidad que si acepta. cantidad_guardias no se controla al
 -- insertar en DESEMPENA.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i23;
 
@@ -1481,7 +1355,6 @@ ROLLBACK TO SAVEPOINT caso_i23;
 -- El caso crea las vacaciones del 2026-12-14 al 2026-12-28 y una guardia,
 -- en una especialidad que el medico si acepta, el 2026-12-20. Nada en el DDL
 -- cruza GUARDIA con VACACION.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i24;
 
@@ -1570,7 +1443,6 @@ ROLLBACK TO SAVEPOINT caso_i24;
 -- El caso crea dos habitaciones. El paciente esta internado en la 7251. La
 -- ronda del martes visita solo la 7252. El recorrido es el martes 2026-11-10,
 -- con la internacion todavia abierta, y el comentario apunta a ese paciente.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i25;
 
@@ -1743,7 +1615,6 @@ ROLLBACK TO SAVEPOINT caso_i25;
 -- El caso crea una internacion que termina el 2026-06-04 a las 09:00 y una
 -- ocupacion de la misma cama que empieza ese dia a las 12:00. OCUPA solo
 -- controla sus propias fechas.
--- Resultado de hoy: los INSERT funcionan. El SAVEPOINT los deshace.
 -- =============================================================================
 SAVEPOINT caso_i26;
 
@@ -1848,3 +1719,63 @@ INSERT INTO ocupa (
 );
 
 ROLLBACK TO SAVEPOINT caso_i26;
+
+-- =============================================================================
+-- Caso de uso: Medico como su propio medico principal
+-- El caso crea a una persona que es medico y tambien paciente. La internacion
+-- usa la matricula de ese medico y el mismo DNI. Debe fallar el trigger
+-- trg_internacion_medico_paciente (ORA-20001).
+-- =============================================================================
+SAVEPOINT caso_i27;
+
+INSERT INTO persona (
+   dni,
+   nombre,
+   apellido
+) VALUES (
+   '42700001',
+   'Sergio',
+   'Diaz'
+);
+
+INSERT INTO paciente (
+   dni,
+   fecha_nacimiento_paciente,
+   sexo_paciente
+) VALUES (
+   '42700001',
+   date '1975-03-02',
+   'M'
+);
+
+INSERT INTO medico (
+   matricula_medico,
+   dni,
+   foto,
+   cuil_cuit,
+   fecha_de_ingreso,
+   cantidad_guardias
+) VALUES (
+   9271,
+   '42700001',
+   null,
+   '20427000019',
+   timestamp '2017-01-10 00:00:00',
+   4
+);
+
+INSERT INTO internacion (
+   id_internacion,
+   fecha_inicio_internacion,
+   fecha_terminacion_internacion,
+   matricula_medico,
+   dni
+) VALUES (
+   6271,
+   timestamp '2026-11-05 08:00:00',
+   null,
+   9271,
+   '42700001'
+);
+
+ROLLBACK TO SAVEPOINT caso_i27;
